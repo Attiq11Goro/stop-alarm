@@ -54,7 +54,7 @@ class MainActivity : Activity() {
             setSelection(1)
         }
         val row = LinearLayout(this)
-        val start = Button(this).apply { text = "START TRIP"; setOnClickListener { onStart() } }
+        val start = Button(this).apply { text = "START TRIP"; setOnClickListener { onStartClicked() } }
         val stop = Button(this).apply { text = "STOP"; setOnClickListener { startService(Intent(this@MainActivity, AlarmService::class.java).setAction(AlarmService.STOP)); info.text = "Stopped" } }
         row.addView(start, LinearLayout.LayoutParams(0, -2, 1f)); row.addView(stop, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(info); root.addView(map, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(spin); root.addView(row)
@@ -94,7 +94,7 @@ class MainActivity : Activity() {
         info.text = "Destination set. Tap START TRIP."
     }
 
-    private fun onStart() {
+    private fun onStartClicked() {
         if (dest == null) { Toast.makeText(this, "Tap the map to choose a destination first", Toast.LENGTH_LONG).show(); return }
         if (!hasLoc()) { pendingStart = true; requestPerms(); return }
         begin()
