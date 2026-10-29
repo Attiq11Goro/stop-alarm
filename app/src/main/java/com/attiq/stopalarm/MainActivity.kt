@@ -17,6 +17,8 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -24,7 +26,9 @@ import android.widget.*
 import org.json.JSONArray
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
-import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
@@ -43,6 +47,10 @@ class MainActivity : Activity() {
     private lateinit var mainBtn: Button
     private lateinit var search: EditText
     private val chips = mutableListOf<Button>()
+    private lateinit var esri: OnlineTileSourceBase
+    private lateinit var otherLink: TextView
+    private var results: JSONArray? = null
+    private var english = true
     private var dest: GeoPoint? = null
     private var destText = ""
     private var marker: Marker? = null
@@ -69,10 +77,13 @@ class MainActivity : Activity() {
         }
         val root = FrameLayout(this)
 
-        // English-labelled map tiles (CARTO Voyager, based on OpenStreetMap)
-        val bases = arrayOf("a", "b", "c", "d").map { "https://$it.basemaps.cartocdn.com/rastertiles/voyager/" }.toTypedArray()
+        // Esri street map tiles (English labels)
+        esri = object : OnlineTileSourceBase("EsriStreet", 0, 19, 256, "", arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/"), "Tiles © Esri") {
+            override fun getTileURLString(pMapTileIndex: Long): String =
+                baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" + MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
+        }
         map = MapView(this).apply {
-            setTileSource(XYTileSource("CartoVoyager", 0, 19, 256, ".png", bases, "© OpenStreetMap contributors © CARTO"))
+            setTileSource(esri)
             setMultiTouchControls(true)
             controller.setZoom(14.0); controller.setCenter(GeoPoint(25.3463, 55.4209))
             overlays.add(MapEventsOverlay(object : MapEventsReceiver {
@@ -99,12 +110,17 @@ class MainActivity : Activity() {
         // Bottom area
         val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val mid = LinearLayout(this).apply { gravity = Gravity.BOTTOM; setPadding(dp(12), 0, dp(12), dp(8)) }
-        val attr = TextView(this).apply { text = "© OpenStreetMap · © CARTO"; textSize = 10f; setTextColor(0xFF444444.toInt()); setBackgroundColor(0xAAFFFFFF.toInt()) }
+        val attr = TextView(this).apply { text = "v3 · Tiles © Esri · Search © OSM"; textSize = 10f; setTextColor(0xFF444444.toInt()); setBackgroundColor(0xAAFFFFFF.toInt()) }
         val fab = Button(this).apply {
             text = "◎"; textSize = 24f; isAllCaps = false; setTextColor(BLUE); background = bg(Color.WHITE, 28)
             elevation = dp(6).toFloat(); setOnClickListener { goMe() }
         }
         mid.addView(attr, LinearLayout.LayoutParams(0, -2, 1f).apply { gravity = Gravity.BOTTOM })
+        val layer = Button(this).apply {
+            text = "🗺"; textSize = 20f; isAllCaps = false; background = bg(Color.WHITE, 28)
+            elevation = dp(6).toFloat(); setOnClickListener { toggleMap() }
+        }
+        mid.addView(layer, LinearLayout.LayoutParams(dp(56), dp(56)).apply { rightMargin = dp(8) })
         mid.addView(fab, LinearLayout.LayoutParams(dp(56), dp(56)))
 
         val card = LinearLayout(this).apply {
@@ -113,6 +129,10 @@ class MainActivity : Activity() {
         }
         val title = TextView(this).apply { text = "Where do you get off?"; textSize = 19f; setTypeface(null, Typeface.BOLD); setTextColor(0xFF111111.toInt()) }
         info = TextView(this).apply { text = "Search above or tap the map to set your stop"; textSize = 14f; setTextColor(0xFF667085.toInt()); setPadding(0, dp(4), 0, dp(12)) }
+        otherLink = TextView(this).apply {
+            text = "Not the right place? See other matches"; textSize = 13f; setTextColor(BLUE); visibility = View.GONE
+            setPadding(0, 0, 0, dp(10)); setOnClickListener { showResults() }
+        }
         val lbl = TextView(this).apply { text = "Wake me up when I'm within:"; textSize = 13f; setTextColor(0xFF444444.toInt()); setPadding(0, 0, 0, dp(6)) }
         val row = LinearLayout(this)
         labels.forEachIndexed { i, t ->
@@ -127,7 +147,7 @@ class MainActivity : Activity() {
             textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.WHITE); isAllCaps = false; stateListAnimator = null
             setOnClickListener { onMain() }
         }
-        card.addView(title); card.addView(info); card.addView(lbl); card.addView(row)
+        card.addView(title); card.addView(info); card.addView(otherLink); card.addView(lbl); card.addView(row)
         card.addView(mainBtn, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(14) })
         bottom.addView(mid)
         bottom.addView(card, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(12), 0, dp(12), dp(12)) })
@@ -182,18 +202,38 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (res == null) { info.text = "Search failed. Check your internet."; return@runOnUiThread }
                 if (res.length() == 0) { info.text = "No results. Try another name or tap the map."; return@runOnUiThread }
-                fun pick(i: Int) {
-                    val o = res.getJSONObject(i)
-                    val p = GeoPoint(o.getString("lat").toDouble(), o.getString("lon").toDouble())
-                    setDest(p, o.getString("display_name")); map.controller.setZoom(16.0); map.controller.animateTo(p)
-                }
-                if (res.length() == 1) pick(0)
-                else {
-                    val names = Array(res.length()) { res.getJSONObject(it).getString("display_name") }
-                    AlertDialog.Builder(this).setTitle("Choose your stop").setItems(names) { _, i -> pick(i) }.show()
-                }
+                results = res
+                pickResult(0)
+                otherLink.visibility = if (res.length() > 1) View.VISIBLE else View.GONE
             }
         }.start()
+    }
+
+    private fun pickResult(i: Int) {
+        val o = results?.getJSONObject(i) ?: return
+        val p = GeoPoint(o.getString("lat").toDouble(), o.getString("lon").toDouble())
+        setDest(p, o.getString("display_name")); map.controller.setZoom(16.0); map.controller.animateTo(p)
+    }
+
+    private fun showResults() {
+        val res = results ?: return
+        val names = Array(res.length()) { res.getJSONObject(it).getString("display_name") }
+        val adapter = object : ArrayAdapter<String>(this, 0, names) {
+            override fun getView(i: Int, v: View?, p: ViewGroup): View {
+                val parts = getItem(i)!!.split(",").map { it.trim() }
+                val l = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), dp(12)) }
+                l.addView(TextView(context).apply { text = parts[0]; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(0xFF111111.toInt()) })
+                l.addView(TextView(context).apply { text = parts.drop(1).take(3).joinToString(", "); textSize = 13f; setTextColor(0xFF667085.toInt()) })
+                return l
+            }
+        }
+        AlertDialog.Builder(this).setTitle("Other matches").setAdapter(adapter) { _, i -> pickResult(i) }.show()
+    }
+
+    private fun toggleMap() {
+        english = !english
+        map.setTileSource(if (english) esri else TileSourceFactory.MAPNIK)
+        Toast.makeText(this, if (english) "Map: English (Esri)" else "Map: Standard (OpenStreetMap)", Toast.LENGTH_SHORT).show()
     }
 
     private fun goMe() {
@@ -229,6 +269,7 @@ class MainActivity : Activity() {
 
     private fun setDest(p: GeoPoint, label: String?) {
         dest = p
+        if (label == null) otherLink.visibility = View.GONE
         val name = label?.split(",")?.take(3)?.joinToString(",")?.trim() ?: "%.5f, %.5f".format(p.latitude, p.longitude)
         destText = "📍 $name"
         info.text = "$destText\nReady. Tap START TRIP."
