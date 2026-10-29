@@ -15,6 +15,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.app.ServiceCompat
 import com.google.android.gms.location.*
+import java.util.Locale
 
 class AlarmService : Service() {
     companion object { const val STOP = "STOP" }
@@ -34,10 +35,12 @@ class AlarmService : Service() {
         dLat = i?.getDoubleExtra("lat", 0.0) ?: 0.0
         dLon = i?.getDoubleExtra("lon", 0.0) ?: 0.0
         radius = i?.getIntExtra("r", 1000) ?: 1000
+        getSharedPreferences("sa", MODE_PRIVATE).edit().remove("dist").apply()
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("track", "Trip tracking", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel("alarm", "Arrival alarm", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null) })
         ServiceCompat.startForeground(this, 1, notif("Tracking your trip…", false), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        wl?.takeIf { it.isHeld }?.release()
         wl = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stopalarm:track").apply { acquire(6 * 60 * 60 * 1000L) }
         fused = LocationServices.getFusedLocationProviderClient(this)
         cb?.let { fused.removeLocationUpdates(it) }
@@ -47,8 +50,9 @@ class AlarmService : Service() {
                 val out = FloatArray(1)
                 Location.distanceBetween(l.latitude, l.longitude, dLat, dLon, out)
                 val d = out[0]
+                getSharedPreferences("sa", MODE_PRIVATE).edit().putFloat("dist", d).apply()
                 if (d <= radius) { if (!ringing) ring() }
-                else if (!ringing) getSystemService(NotificationManager::class.java).notify(1, notif("Distance left: " + (if (d >= 1000) "%.1f km".format(d / 1000) else "${d.toInt()} m"), false))
+                else if (!ringing) getSystemService(NotificationManager::class.java).notify(1, notif("Distance left: " + (if (d >= 1000) String.format(Locale.US, "%.1f km", d / 1000) else "${d.toInt()} m"), false))
             }
         }
         try {
@@ -86,6 +90,7 @@ class AlarmService : Service() {
         player?.run { try { stop() } catch (_: Exception) {}; release() }
         (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
         wl?.takeIf { it.isHeld }?.release()
+        getSharedPreferences("sa", MODE_PRIVATE).edit().remove("dist").apply()
         super.onDestroy()
     }
 }
