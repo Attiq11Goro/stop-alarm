@@ -13,10 +13,22 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application android:label="Stop Alarm" android:icon="@android:drawable/ic_lock_idle_alarm"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
-        <activity android:name=".MainActivity" android:exported="true" android:showWhenLocked="true" android:turnScreenOn="true">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
+            android:showWhenLocked="true" android:turnScreenOn="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="geo"/>
             </intent-filter>
         </activity>
         <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="location"/>
